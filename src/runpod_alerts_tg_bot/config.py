@@ -20,7 +20,7 @@ class AppConfig(BaseSettings):
     alert_decay_factor: float = 0.5
     alert_minimum_interval_minutes: float = 15.0
     alert_hysteresis_usd: float = 2.0
-    poll_interval_sec: float = 10.0
+    poll_interval_sec: float = 300.0
     log_level: str = Field(default="INFO")
 
     @field_validator("log_level")
