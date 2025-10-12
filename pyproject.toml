@@ -1,0 +1,23 @@
+[project]
+name = "runpod-alerts-tg-bot"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "Robert Platov", email = "curryricedev@proton.me" }
+]
+requires-python = ">=3.13"
+dependencies = [
+    "aiogram>=3.22.0",
+    "httpx>=0.27.0",
+    "APScheduler>=3.10.4",
+    "tzdata>=2024.1",
+    "pydantic-settings>=2.11.0",
+]
+
+[project.scripts]
+runpod-alerts-tg-bot = "runpod_alerts_tg_bot:main"
+
+[build-system]
+requires = ["uv_build>=0.8.17,<0.9.0"]
+build-backend = "uv_build"
