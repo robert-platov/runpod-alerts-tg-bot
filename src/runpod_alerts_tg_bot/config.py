@@ -15,7 +15,7 @@ class AppConfig(BaseSettings):
     telegram_chat_id: str
     daily_notify_time: str = "12:00"
     daily_notify_tz: str = "UTC"
-    low_balance_usd: float = 4000.0
+    low_balance_usd: float = 200.0
     alert_initial_interval_minutes: float = 120.0
     alert_decay_factor: float = 0.5
     alert_minimum_interval_minutes: float = 15.0
