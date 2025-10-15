@@ -80,13 +80,16 @@ class SimulationRunner:
         self.state_path = Path(self.temp_dir) / "state.json"
         logger.info(f"Using temporary state file: {self.state_path}")
 
-    def _create_mock_config(self) -> AppConfig:
+    def _create_mock_config(
+        self, pod_stop_balance_usd: float = 0.0, low_balance_usd: float = 20.0
+    ) -> AppConfig:
         """Create a mock config for testing."""
         return AppConfig(
             runpod_api_key="mock_key",
             telegram_bot_token="mock_token",
             telegram_chat_id="mock_chat",
-            low_balance_usd=20.0,
+            low_balance_usd=low_balance_usd,
+            pod_stop_balance_usd=pod_stop_balance_usd,
             alert_initial_interval_minutes=120.0,
             alert_decay_factor=0.5,
             alert_minimum_interval_minutes=15.0,
@@ -100,6 +103,8 @@ class SimulationRunner:
         sender: MockTelegramSender,
         simulate_time_passage: bool = False,
         minutes_to_simulate: float = 0,
+        pod_stop_balance_usd: float = 0.0,
+        low_balance_usd: float = 20.0,
     ) -> None:
         """Run a single scenario."""
         logger.info("")
@@ -110,14 +115,18 @@ class SimulationRunner:
         logger.info(f"🎬 Spend rate: ${scenario.spend_per_hr:,.2f}/hr")
 
         if scenario.spend_per_hr > 0:
-            hours_left = scenario.balance / scenario.spend_per_hr
+            hours_left = (
+                scenario.balance - pod_stop_balance_usd
+            ) / scenario.spend_per_hr
             logger.info(f"🎬 Time remaining: {hours_left:.1f} hours")
         else:
             logger.info("🎬 Time remaining: ∞ (no spend)")
 
         logger.info("🎬 " + "=" * 78)
 
-        cfg = self._create_mock_config()
+        cfg = self._create_mock_config(
+            pod_stop_balance_usd=pod_stop_balance_usd, low_balance_usd=low_balance_usd
+        )
 
         balance_info = BalanceInfo(
             client_balance=scenario.balance,
@@ -418,6 +427,277 @@ class SimulationRunner:
 
         logger.info("✅ Scenario 10 passed: Edge cases handled correctly")
 
+    async def run_scenario_11_negative_threshold(self) -> None:
+        """Scenario 11: Negative balance threshold."""
+        sender = MockTelegramSender()
+
+        logger.info("")
+        logger.info("🎬 " + "=" * 78)
+        logger.info("🎬 Scenario: Negative Threshold - Part 1")
+        logger.info("🎬 Testing with threshold at $-1500 and balance at $-1000")
+        logger.info("🎬 " + "=" * 78)
+
+        # Create config with negative threshold
+        cfg = AppConfig(
+            runpod_api_key="mock_key",
+            telegram_bot_token="mock_token",
+            telegram_chat_id="mock_chat",
+            low_balance_usd=-1500.0,
+            pod_stop_balance_usd=0.0,
+            alert_initial_interval_minutes=120.0,
+            alert_decay_factor=0.5,
+            alert_minimum_interval_minutes=15.0,
+            alert_hysteresis_usd=2.0,
+            poll_interval_sec=10.0,
+        )
+
+        balance_info = BalanceInfo(
+            client_balance=-1000.0,
+            current_spend_per_hr=5.0,
+        )
+
+        service = AlertsService(cfg, sender, self.state_path)
+
+        async def mock_fetch() -> BalanceInfo:
+            return balance_info
+
+        service._fetch = mock_fetch
+
+        logger.info(f"🎬 Balance: ${-1000.0:,.2f}")
+        logger.info(f"🎬 Threshold: ${-1500.0:,.2f}")
+        logger.info(f"🎬 Spend rate: ${5.0:,.2f}/hr")
+        logger.info("🎬 Expected: No alert (balance above threshold)")
+
+        await service.poll_and_alert()
+
+        assert len(sender.messages) == 0, (
+            "Should not send alert when balance (-1000) is above threshold (-1500)"
+        )
+
+        logger.info("✅ Part 1 passed: No alert when balance above negative threshold")
+
+        # Part 2: Balance below negative threshold - should trigger alert
+        self.state_path.unlink(missing_ok=True)
+        sender.messages.clear()
+
+        logger.info("")
+        logger.info("🎬 " + "=" * 78)
+        logger.info("🎬 Scenario: Negative Threshold - Part 2")
+        logger.info("🎬 Testing with threshold at $-1500 and balance at $-1800")
+        logger.info("🎬 " + "=" * 78)
+
+        balance_info_below = BalanceInfo(
+            client_balance=-1800.0,
+            current_spend_per_hr=5.0,
+        )
+
+        service_below = AlertsService(cfg, sender, self.state_path)
+
+        async def mock_fetch_below() -> BalanceInfo:
+            return balance_info_below
+
+        service_below._fetch = mock_fetch_below
+
+        logger.info(f"🎬 Balance: ${-1800.0:,.2f}")
+        logger.info(f"🎬 Threshold: ${-1500.0:,.2f}")
+        logger.info(f"🎬 Spend rate: ${5.0:,.2f}/hr")
+        logger.info("🎬 Expected: Alert (balance below threshold)")
+
+        await service_below.poll_and_alert()
+
+        assert len(sender.messages) == 1, (
+            "Should send alert when balance (-1800) is below threshold (-1500)"
+        )
+        assert "LOW BALANCE ALERT" in sender.messages[0]["text"]
+        assert (
+            "$-1,800" in sender.messages[0]["text"]
+            or "-$1,800" in sender.messages[0]["text"]
+        )
+
+        logger.info(
+            "✅ Part 2 passed: Alert sent when balance below negative threshold"
+        )
+
+        # Part 3: Balance below negative threshold with zero spend - depleted state
+        self.state_path.unlink(missing_ok=True)
+        sender.messages.clear()
+
+        logger.info("")
+        logger.info("🎬 " + "=" * 78)
+        logger.info("🎬 Scenario: Negative Threshold - Part 3")
+        logger.info(
+            "🎬 Testing with threshold at $-1500 and balance at $-2000 (pods stopped)"
+        )
+        logger.info("🎬 " + "=" * 78)
+
+        balance_info_depleted = BalanceInfo(
+            client_balance=-2000.0,
+            current_spend_per_hr=0.0,
+        )
+
+        service_depleted = AlertsService(cfg, sender, self.state_path)
+
+        async def mock_fetch_depleted() -> BalanceInfo:
+            return balance_info_depleted
+
+        service_depleted._fetch = mock_fetch_depleted
+
+        logger.info(f"🎬 Balance: ${-2000.0:,.2f}")
+        logger.info(f"🎬 Threshold: ${-1500.0:,.2f}")
+        logger.info(f"🎬 Spend rate: ${0.0:,.2f}/hr")
+        logger.info(
+            "🎬 Expected: Depleted alert (balance below threshold, pods stopped)"
+        )
+
+        await service_depleted.poll_and_alert()
+
+        assert len(sender.messages) == 1, (
+            "Should send depleted alert when balance (-2000) is below threshold (-1500) with zero spend"
+        )
+        assert "BALANCE DEPLETED" in sender.messages[0]["text"]
+        assert (
+            "$-2,000" in sender.messages[0]["text"]
+            or "-$2,000" in sender.messages[0]["text"]
+        )
+
+        logger.info(
+            "✅ Part 3 passed: Depleted alert sent for balance below negative threshold with zero spend"
+        )
+        logger.info("✅ Scenario 11 passed: Negative threshold handled correctly")
+        logger.info("")
+
+    async def run_scenario_12_negative_pod_stop_balance(self) -> None:
+        """Scenario 12: Negative pod stop balance."""
+        sender = MockTelegramSender()
+
+        logger.info("")
+        logger.info("🎬 " + "=" * 78)
+        logger.info("🎬 Scenario: Negative Pod Stop Balance - Part 1")
+        logger.info("🎬 Testing with pod_stop_balance at $-1500 and balance at $-1000")
+        logger.info("🎬 " + "=" * 78)
+
+        # Test 1: Balance above pod stop threshold, should calculate time correctly
+        scenario1 = SimulatedBalanceScenario(
+            name="Negative Balance - Still Running",
+            balance=-1000.0,
+            spend_per_hr=5.0,
+            description="Balance at -$1000, pods stop at -$1500, spend $5/hr",
+        )
+
+        await self._run_scenario(
+            scenario1, sender, pod_stop_balance_usd=-1500.0, low_balance_usd=20.0
+        )
+
+        # With balance=-1000, pod_stop=-1500, spend=5
+        # hours_left = (-1000 - (-1500)) / 5 = 500 / 5 = 100 hours
+        # Should see alert since -1000 < 20.0 (low_balance_usd)
+        assert len(sender.messages) == 1, "Should send low balance alert"
+        assert "LOW BALANCE ALERT" in sender.messages[0]["text"]
+        # Check that time remaining is calculated correctly (should show ~100 hours)
+        logger.info("📊 Message shows time remaining for 100 hours of runway")
+
+        logger.info(
+            "✅ Part 1 passed: Time calculation correct with negative pod stop balance"
+        )
+
+        # Part 2: Balance reaches pod stop threshold with zero spend
+        self.state_path.unlink(missing_ok=True)
+        sender.messages.clear()
+
+        logger.info("")
+        logger.info("🎬 " + "=" * 78)
+        logger.info("🎬 Scenario: Negative Pod Stop Balance - Part 2")
+        logger.info("🎬 Testing with balance at -$1600 (below pod stop), pods stopped")
+        logger.info("🎬 " + "=" * 78)
+
+        scenario2 = SimulatedBalanceScenario(
+            name="Negative Balance - Pods Stopped",
+            balance=-1600.0,
+            spend_per_hr=0.0,
+            description="Balance at -$1600, pods stop at -$1500, spend $0/hr",
+        )
+
+        await self._run_scenario(
+            scenario2, sender, pod_stop_balance_usd=-1500.0, low_balance_usd=20.0
+        )
+
+        assert len(sender.messages) == 1, "Should send depleted alert"
+        assert "BALANCE DEPLETED" in sender.messages[0]["text"]
+
+        logger.info(
+            "✅ Part 2 passed: Depleted alert sent when balance below negative pod stop"
+        )
+
+        # Part 3: Balance at -$800, threshold at -$1000, pod_stop at -$1500
+        self.state_path.unlink(missing_ok=True)
+        sender.messages.clear()
+
+        logger.info("")
+        logger.info("🎬 " + "=" * 78)
+        logger.info("🎬 Scenario: Negative Pod Stop Balance - Part 3")
+        logger.info(
+            "🎬 Testing with balance -$800 > threshold -$1000 > pod_stop -$1500"
+        )
+        logger.info("🎬 " + "=" * 78)
+
+        scenario3 = SimulatedBalanceScenario(
+            name="Negative Balance - Above Threshold",
+            balance=-800.0,
+            spend_per_hr=5.0,
+            description="Balance at -$800, threshold -$1000, pods stop at -$1500",
+        )
+
+        await self._run_scenario(
+            scenario3, sender, pod_stop_balance_usd=-1500.0, low_balance_usd=-1000.0
+        )
+
+        # With balance=-800, threshold=-1000, -800 > -1000, so no alert
+        assert len(sender.messages) == 0, (
+            "Should not send alert when balance (-800) above threshold (-1000)"
+        )
+
+        logger.info(
+            "✅ Part 3 passed: No alert when negative balance above negative threshold"
+        )
+
+        # Part 4: Balance at -$1200, threshold at -$1000, pod_stop at -$1500
+        self.state_path.unlink(missing_ok=True)
+        sender.messages.clear()
+
+        logger.info("")
+        logger.info("🎬 " + "=" * 78)
+        logger.info("🎬 Scenario: Negative Pod Stop Balance - Part 4")
+        logger.info(
+            "🎬 Testing with balance -$1200 < threshold -$1000 > pod_stop -$1500"
+        )
+        logger.info("🎬 " + "=" * 78)
+
+        scenario4 = SimulatedBalanceScenario(
+            name="Negative Balance - Below Threshold",
+            balance=-1200.0,
+            spend_per_hr=5.0,
+            description="Balance at -$1200, threshold -$1000, pods stop at -$1500",
+        )
+
+        await self._run_scenario(
+            scenario4, sender, pod_stop_balance_usd=-1500.0, low_balance_usd=-1000.0
+        )
+
+        # With balance=-1200, threshold=-1000, -1200 < -1000, should alert
+        # Time remaining = (-1200 - (-1500)) / 5 = 300 / 5 = 60 hours
+        assert len(sender.messages) == 1, (
+            "Should send alert when balance (-1200) below threshold (-1000)"
+        )
+        assert "LOW BALANCE ALERT" in sender.messages[0]["text"]
+
+        logger.info(
+            "✅ Part 4 passed: Alert sent when negative balance below negative threshold"
+        )
+        logger.info(
+            "✅ Scenario 12 passed: Negative pod stop balance handled correctly"
+        )
+        logger.info("")
+
     async def run_all_scenarios(self) -> None:
         """Run all simulation scenarios."""
         logger.info("")
@@ -452,6 +732,12 @@ class SimulationRunner:
             self.state_path.unlink(missing_ok=True)
 
             await self.run_scenario_10_edge_cases()
+            self.state_path.unlink(missing_ok=True)
+
+            await self.run_scenario_11_negative_threshold()
+            self.state_path.unlink(missing_ok=True)
+
+            await self.run_scenario_12_negative_pod_stop_balance()
 
             logger.info("")
             logger.info("🎉 " + "=" * 78)

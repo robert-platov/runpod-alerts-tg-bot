@@ -19,6 +19,7 @@ DAILY_BALANCE_TEMPLATE = (
     "ℹ️ <b>RunPod Daily Balance Report</b>\n\n"
     "💰 Balance: ${balance:,.2f}\n"
     "⚡️ Spend rate: ${spend:,.2f}/hr\n"
+    "🛑 Pods stop at: ${pod_stop_balance:,.2f}\n"
     "⏳ Time remaining: ~{time_remaining}\n"
     "🕐 Will run out at: ~{eta}"
 )
@@ -28,6 +29,7 @@ LOW_BALANCE_ALERT_TEMPLATE = (
     "💰 Current balance: ${balance:,.2f}\n"
     "⚠️ Threshold: ${threshold:,.2f}\n"
     "⚡️ Spend rate: ${spend:,.2f}/hr\n"
+    "🛑 Pods stop at: ${pod_stop_balance:,.2f}\n"
     "⏳ Time remaining: ~{time_remaining}\n"
     "🕐 Will run out at: {eta}"
 )
@@ -43,8 +45,9 @@ BALANCE_DEPLETED_TEMPLATE = (
     "🔴 <b>BALANCE DEPLETED - PODS STOPPED</b>\n\n"
     "💰 Current balance: ${balance:,.2f}\n"
     "⚠️ Threshold: ${threshold:,.2f}\n"
+    "🛑 Pod stop balance: ${pod_stop_balance:,.2f}\n"
     "⚡️ Spend rate: $0.00/hr (pods stopped)\n"
-    "🛑 All pods have been shut down due to insufficient balance"
+    "💀 All pods have been shut down due to insufficient balance"
 )
 
 
@@ -121,11 +124,10 @@ class AlertsService:
         dt = datetime.now(tz=UTC) + timedelta(hours=hours_left)
         return dt.strftime("%Y-%m-%d %H:%M UTC")
 
-    @staticmethod
-    def _format_hours_left(balance: float, spend_per_hr: float) -> float:
+    def _format_hours_left(self, balance: float, spend_per_hr: float) -> float:
         if spend_per_hr <= 0:
             return math.inf
-        return balance / spend_per_hr
+        return (balance - self._cfg.pod_stop_balance_usd) / spend_per_hr
 
     async def send_daily(self) -> None:
         info = await self._fetch()
@@ -135,7 +137,11 @@ class AlertsService:
         time_remaining = self._format_time_remaining(hours_left)
         eta = self._format_eta(hours_left)
         text = DAILY_BALANCE_TEMPLATE.format(
-            balance=balance, spend=spend, time_remaining=time_remaining, eta=eta
+            balance=balance,
+            spend=spend,
+            pod_stop_balance=self._cfg.pod_stop_balance_usd,
+            time_remaining=time_remaining,
+            eta=eta,
         )
         try:
             await self._sender.send_message(text, disable_notification=True)
@@ -168,6 +174,7 @@ class AlertsService:
                     text = BALANCE_DEPLETED_TEMPLATE.format(
                         balance=balance,
                         threshold=threshold,
+                        pod_stop_balance=self._cfg.pod_stop_balance_usd,
                     )
                     try:
                         await self._sender.send_message(text)
@@ -222,6 +229,7 @@ class AlertsService:
                     balance=balance,
                     threshold=threshold,
                     spend=spend,
+                    pod_stop_balance=self._cfg.pod_stop_balance_usd,
                     time_remaining=time_remaining,
                     eta=eta,
                 )

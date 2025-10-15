@@ -33,6 +33,7 @@ def main() -> None:
         bot,
         allowed_chat_id=cfg.telegram_chat_id,
         get_balance_cb=get_balance_cb,
+        pod_stop_balance_usd=cfg.pod_stop_balance_usd,
     )
 
     async def run_all() -> None:

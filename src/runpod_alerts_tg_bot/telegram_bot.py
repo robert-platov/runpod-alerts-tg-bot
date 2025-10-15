@@ -15,6 +15,7 @@ BALANCE_COMMAND_TEMPLATE = (
     "💰 <b>RunPod Balance</b>\n\n"
     "💵 Balance: ${balance:,.2f}\n"
     "⚡️ Spend rate: ${spend:,.2f}/hr\n"
+    "🛑 Pods stop at: ${pod_stop_balance:,.2f}\n"
     "⏳ Time remaining: ~{time_remaining}\n"
     "🕐 Will run out at: {eta}"
 )
@@ -23,6 +24,7 @@ BALANCE_COMMAND_INFINITE_TEMPLATE = (
     "💰 <b>RunPod Balance</b>\n\n"
     "💵 Balance: ${balance:,.2f}\n"
     "⚡️ Spend rate: $0.00/hr\n"
+    "🛑 Pods stop at: ${pod_stop_balance:,.2f}\n"
     "⏳ Time remaining: ∞"
 )
 
@@ -61,9 +63,16 @@ class TelegramSender:
 
 
 class TelegramApp:
-    def __init__(self, bot: Bot, allowed_chat_id: str, get_balance_cb) -> None:
+    def __init__(
+        self,
+        bot: Bot,
+        allowed_chat_id: str,
+        get_balance_cb,
+        pod_stop_balance_usd: float = 0.0,
+    ) -> None:
         self._bot = bot
         self._allowed_chat_id = allowed_chat_id
+        self._pod_stop_balance_usd = pod_stop_balance_usd
         self._dp = Dispatcher()
         self._register_handlers(get_balance_cb)
 
@@ -80,14 +89,17 @@ class TelegramApp:
                 balance = info.client_balance
                 spend = info.current_spend_per_hr
                 if spend <= 0:
-                    text = BALANCE_COMMAND_INFINITE_TEMPLATE.format(balance=balance)
+                    text = BALANCE_COMMAND_INFINITE_TEMPLATE.format(
+                        balance=balance, pod_stop_balance=self._pod_stop_balance_usd
+                    )
                 else:
-                    hours_left = balance / spend
+                    hours_left = (balance - self._pod_stop_balance_usd) / spend
                     time_remaining = _format_time_remaining(hours_left)
                     eta = _format_eta(hours_left)
                     text = BALANCE_COMMAND_TEMPLATE.format(
                         balance=balance,
                         spend=spend,
+                        pod_stop_balance=self._pod_stop_balance_usd,
                         time_remaining=time_remaining,
                         eta=eta,
                     )

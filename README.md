@@ -22,6 +22,7 @@ Optional (defaults in parentheses):
 - `DAILY_NOTIFY_TIME` ("12:00")
 - `DAILY_NOTIFY_TZ` ("UTC")
 - `LOW_BALANCE_USD` (20.0)
+- `POD_STOP_BALANCE_USD` (0.0) - balance at which pods actually stop (can be negative)
 - `ALERT_INITIAL_INTERVAL_MINUTES` (360.0)
 - `ALERT_DECAY_FACTOR` (0.5)
 - `ALERT_MINIMUM_INTERVAL_MINUTES` (15.0)
@@ -58,6 +59,7 @@ The bot responds to commands only from the configured `TELEGRAM_CHAT_ID`:
 💰 RunPod Balance
 💵 Balance: $123.45
 ⚡️ Spend rate: $1.23/hr
+🛑 Pods stop at: $0.00
 ⏳ Time remaining: ~4d 5.4h
 🕐 Will run out at: 2025-10-17 17:30 UTC
 ```
@@ -67,6 +69,7 @@ The bot responds to commands only from the configured `TELEGRAM_CHAT_ID`:
 ℹ️ RunPod Daily Balance Report
 💰 Balance: $123.45
 ⚡️ Spend rate: $1.23/hr
+🛑 Pods stop at: $0.00
 ⏳ Time remaining: ~4d 5.4h
 🕐 Will run out at: ~2025-10-17 17:30 UTC
 ```
@@ -77,6 +80,7 @@ The bot responds to commands only from the configured `TELEGRAM_CHAT_ID`:
 💰 Current balance: $12.34
 ⚠️ Threshold: $20.00
 ⚡️ Spend rate: $0.90/hr
+🛑 Pods stop at: $0.00
 ⏳ Time remaining: ~13.7h
 🕐 Will run out at: 2025-10-13 03:12 UTC
 ```
@@ -97,7 +101,7 @@ A comprehensive simulation script is available to test the service without requi
 uv run simulate.py
 ```
 
-The simulation tests 10 different scenarios including:
+The simulation tests 12 different scenarios including:
 - Normal balance operation
 - Low balance alerts with exponential decay intervals
 - Balance recovery notifications
@@ -106,4 +110,6 @@ The simulation tests 10 different scenarios including:
 - Recovery from depleted state
 - Edge cases and boundary conditions
 - Daily report generation
+- Negative threshold handling
+- Negative pod stop balance (pods run below $0)
 
